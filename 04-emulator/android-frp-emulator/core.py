@@ -97,7 +97,36 @@ class VirtualDevice:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "VirtualDevice":
         device = cls(device_id=str(data["device_id"]), state=State(data["state"]))
-        device.events = [Event(**event) for event in data.get("events", [])]
+        events = [Event(**event) for event in data.get("events", [])]
+        current = State.FACTORY_RESET
+        for expected_sequence, event in enumerate(events, 1):
+            if event.sequence != expected_sequence:
+                raise ValueError("event sequence is not contiguous")
+            try:
+                source_state = State(event.from_state)
+                target_state = State(event.to_state)
+            except ValueError as exc:
+                raise ValueError("event contains an unknown state") from exc
+            if source_state is not current:
+                raise ValueError("event history does not match previous state")
+            if event.accepted:
+                if target_state not in TRANSITIONS[current] or event.reason != "transition_accepted":
+                    raise ValueError("accepted event violates the transition contract")
+                current = target_state
+            elif event.reason == "invalid_transition":
+                if target_state in TRANSITIONS[current]:
+                    raise ValueError("rejected event conflicts with transition contract")
+            elif event.reason == "invalid_lab_token":
+                if current is not State.FRP_LOCKED or target_state is not State.ACCOUNT_VERIFIED:
+                    raise ValueError("invalid-token event violates activation contract")
+            elif event.reason == "activation_requires_frp_locked":
+                if current is State.FRP_LOCKED or target_state is not State.ACCOUNT_VERIFIED:
+                    raise ValueError("activation rejection violates state contract")
+            else:
+                raise ValueError("unknown event rejection reason")
+        if current is not device.state:
+            raise ValueError("serialized state does not match event history")
+        device.events = events
         return device
 
     @classmethod
