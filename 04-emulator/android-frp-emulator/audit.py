@@ -109,10 +109,20 @@ def run_audit() -> AuditReport:
 def main() -> int:
     report = run_audit()
     payload = report.to_dict()
-    output = Path("audit.json")
-    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    audit_path = Path("audit.json")
+    audit_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+    # Generate the manifest after audit.json exists so a standalone audit also
+    # closes the reproducibility chain. The local import avoids a module cycle.
+    from manifest import build_manifest
+
+    manifest = build_manifest()
+    manifest_path = Path("reproducibility-manifest.json")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
     print(json.dumps(payload, indent=2, sort_keys=True))
-    return 0 if report.overall_status == "PASS" else 1
+    print(json.dumps(manifest, indent=2, sort_keys=True))
+    return 0 if report.overall_status == "PASS" and manifest["overall_status"] == "PASS" else 1
 
 
 if __name__ == "__main__":
