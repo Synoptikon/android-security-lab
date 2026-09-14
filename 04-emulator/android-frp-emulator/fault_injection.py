@@ -8,9 +8,12 @@ credentials, or real FRP state.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from pathlib import Path
 
-from core import Event, State, VirtualDevice
+from core import State, VirtualDevice
+
+
+REPORT_PATH = Path("fault-injection.json")
 
 
 def baseline() -> VirtualDevice:
@@ -58,9 +61,9 @@ def exercise_faults() -> dict[str, object]:
     except (KeyError, ValueError, TypeError):
         rejected.append("invalid_state")
 
-    tampered = VirtualDevice.from_dict(fault_cases["tampered_event"])
-    event = tampered.events[0]
-    if event.sequence != 1 or event.from_state != State.BOOT.value:
+    try:
+        VirtualDevice.from_dict(fault_cases["tampered_event"])
+    except (KeyError, ValueError, TypeError):
         rejected.append("tampered_event")
     else:
         accepted_faults.append("tampered_event")
@@ -79,6 +82,7 @@ def exercise_faults() -> dict[str, object]:
 
 def main() -> int:
     report = exercise_faults()
+    REPORT_PATH.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["overall_status"] == "PASS" else 1
 
