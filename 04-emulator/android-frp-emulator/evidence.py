@@ -19,9 +19,16 @@ def main() -> int:
         "audit": audit.to_dict(),
         "passed": all(result.passed for result in results) and audit.overall_status == "PASS",
     }
-    output = Path("evidence.json")
-    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+    evidence_path = Path("evidence.json")
+    audit_path = Path("audit.json")
+    evidence_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    audit_path.write_text(json.dumps(audit.to_dict(), indent=2, sort_keys=True) + "\n")
+
     manifest = build_manifest()
+    manifest_path = Path("reproducibility-manifest.json")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
     print(json.dumps(payload, indent=2, sort_keys=True))
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0 if payload["passed"] and manifest["overall_status"] == "PASS" else 1
