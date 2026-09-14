@@ -18,11 +18,12 @@ def main() -> int:
     manifest = load("reproducibility-manifest.json")
     matrix = load("transition-matrix.json")
     faults = load("fault-injection.json")
+    resilience = load("resilience-matrix.json")
     evidence_hash = hashlib.sha256((ROOT / "evidence.json").read_bytes()).hexdigest()
     checks = {
         "scope": all(
             x.get("scope") == "controlled-simulator-only"
-            for x in (evidence, audit, matrix, faults)
+            for x in (evidence, audit, matrix, faults, resilience)
         ),
         "evidence_passed": evidence.get("overall_status") == "PASS",
         "audit_passed": audit.get("overall_status") == "PASS",
@@ -34,6 +35,10 @@ def main() -> int:
         "fault_injection_passed": faults.get("overall_status") == "PASS",
         "fault_injection_coverage": faults.get("coverage") == 1.0,
         "faults_unexpectedly_accepted": faults.get("unexpectedly_accepted") == [],
+        "resilience_passed": resilience.get("overall_status") == "PASS",
+        "resilience_failed_cases": resilience.get("failed_cases") == [],
+        "resilience_invariant_failures": resilience.get("invariant_failures") == 0,
+        "resilience_transition_coverage": resilience.get("transition_coverage") == 1.0,
         "invalid_token_coverage": audit.get("invalid_token_coverage") is True,
         "recovery_coverage": audit.get("recovery_coverage") is True,
         "persistence_coverage": audit.get("persistence_coverage") is True,
@@ -45,7 +50,7 @@ def main() -> int:
     }
     failed = [key for key, value in checks.items() if not value]
     result = {
-        "schema": "frp-emulator-release-gate/v3",
+        "schema": "frp-emulator-release-gate/v4",
         "checks": checks,
         "failed": failed,
         "overall_status": "PASS" if not failed else "FAIL",
