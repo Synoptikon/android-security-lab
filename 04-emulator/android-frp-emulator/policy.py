@@ -26,6 +26,12 @@ class PolicyProfile:
         if not self.reset_returns_to_factory_state:
             raise ValueError("the controlled lab requires reset to return to FACTORY_RESET")
 
+    def allows_account_activation(self) -> bool:
+        return self.account_verification_required
+
+    def allows_recovery(self) -> bool:
+        return self.recovery_allowed
+
 
 DEFAULT_POLICY = PolicyProfile(
     name="default",
