@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core import State, TRANSITIONS, VirtualDevice
+from core import TRANSITIONS, VirtualDevice
 
 
 def expected_transitions() -> set[tuple[str, str]]:
@@ -28,11 +28,12 @@ def exercise_transitions() -> dict[str, object]:
         for target in targets:
             device = VirtualDevice(f"matrix-{source.value}-{target.value}")
             device.state = source
-            event = device.transition(target)
-            if event.accepted:
-                observed.add((event.from_state, event.to_state))
+            previous = device.state.value
+            result = device.transition(target)
+            if result is target:
+                observed.add((previous, result.value))
             else:
-                rejected.append({"from": event.from_state, "to": event.to_state})
+                rejected.append({"from": previous, "to": target.value})
 
     uncovered = sorted(expected - observed)
     return {
