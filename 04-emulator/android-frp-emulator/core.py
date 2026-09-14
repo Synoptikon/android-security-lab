@@ -11,6 +11,8 @@ from typing import Any
 import json
 import re
 
+from policy import DEFAULT_POLICY, PolicyProfile
+
 
 class State(str, Enum):
     FACTORY_RESET = "FACTORY_RESET"
@@ -56,23 +58,36 @@ class VirtualDevice:
     state: State = State.FACTORY_RESET
     events: list[Event] = field(default_factory=list)
 
-    def transition(self, target: State, source: str = "simulator") -> State:
+    def transition(
+        self,
+        target: State,
+        source: str = "simulator",
+        policy: PolicyProfile = DEFAULT_POLICY,
+    ) -> State:
         if target not in TRANSITIONS[self.state]:
             self._log(source, target, False, "invalid_transition")
             raise InvalidTransition(f"{self.state.value} -> {target.value} is not allowed")
+        if target is State.RECOVERY and not policy.allows_recovery():
+            self._log(source, target, False, f"policy_recovery_denied:{policy.name}")
+            raise InvalidTransition(
+                f"{self.state.value} -> {target.value} denied by policy {policy.name}"
+            )
         previous = self.state
         self.state = target
         self._log(source, target, True, "transition_accepted", previous)
         return self.state
 
-    def activate(self, token: str) -> State:
+    def activate(self, token: str, policy: PolicyProfile = DEFAULT_POLICY) -> State:
         if self.state is not State.FRP_LOCKED:
             self._log("activate", State.ACCOUNT_VERIFIED, False, "activation_requires_frp_locked")
             raise InvalidTransition("activation is only evaluated from FRP_LOCKED")
+        if not policy.allows_account_activation():
+            self._log("activate", State.ACCOUNT_VERIFIED, False, f"policy_activation_denied:{policy.name}")
+            raise InvalidTransition(f"activation denied by policy {policy.name}")
         if not TOKEN_RE.fullmatch(token):
             self._log("activate", State.ACCOUNT_VERIFIED, False, "invalid_lab_token")
             raise InvalidToken("expected synthetic token format LAB-FRP-XXXXXXXX")
-        return self.transition(State.ACCOUNT_VERIFIED, source="activate")
+        return self.transition(State.ACCOUNT_VERIFIED, source="activate", policy=policy)
 
     def _log(self, source: str, target: State, accepted: bool, reason: str, previous: State | None = None) -> None:
         self.events.append(Event(
