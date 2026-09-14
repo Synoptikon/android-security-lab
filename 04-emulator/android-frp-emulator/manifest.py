@@ -1,6 +1,6 @@
-"""Build a reproducibility manifest from the latest emulator evidence and audit.
+"""Build a reproducibility manifest from the generated evidence and audit.
 
-This layer records only deterministic simulator metadata and cryptographic hashes.
+This layer records deterministic simulator metadata and cryptographic hashes.
 It never accesses Android devices, ADB/Fastboot, credentials, or real FRP state.
 """
 from __future__ import annotations
@@ -9,9 +9,6 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
-
-from audit import run_audit
-from scenario import SCENARIOS, run_scenario
 
 SCHEMA = "frp-emulator-reproducibility-manifest/v1"
 
@@ -30,38 +27,33 @@ def _commit_sha() -> str:
 
 
 def build_manifest() -> dict[str, object]:
-    results = [run_scenario(name, f"manifest-{index:03d}") for index, name in enumerate(SCENARIOS, 1)]
-    audit = run_audit()
+    evidence_path = Path("evidence.json")
+    audit_path = Path("audit.json")
+    if not evidence_path.exists() or not audit_path.exists():
+        raise FileNotFoundError("evidence.json and audit.json must exist before manifest generation")
 
-    evidence = {
-        "schema": "frp-emulator-evidence/v2",
-        "scope": "controlled-simulator-only",
-        "scenarios": [result.__dict__ for result in results],
-        "audit": audit.to_dict(),
-        "passed": all(result.passed for result in results) and audit.overall_status == "PASS",
-    }
-    evidence_path = Path("manifest-evidence.json")
-    evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
+    evidence = json.loads(evidence_path.read_text())
+    audit = json.loads(audit_path.read_text())
+    passed = bool(evidence.get("passed")) and audit.get("overall_status") == "PASS"
 
-    manifest = {
+    return {
         "schema": SCHEMA,
         "scope": "controlled-simulator-only",
         "commit_sha": _commit_sha(),
-        "evidence_schema": evidence["schema"],
-        "audit_schema": audit.schema,
-        "scenarios": list(SCENARIOS),
-        "scenario_coverage": audit.scenario_coverage,
-        "transition_coverage": audit.transition_coverage,
-        "invariant_failures": audit.invariant_failures,
-        "invalid_token_coverage": audit.invalid_token_coverage,
-        "recovery_coverage": audit.recovery_coverage,
-        "persistence_coverage": audit.persistence_coverage,
-        "security_boundary_status": audit.security_boundary_status,
+        "evidence_schema": evidence.get("schema"),
+        "audit_schema": audit.get("schema"),
+        "scenarios": [item["name"] for item in evidence.get("scenarios", [])],
+        "scenario_coverage": audit.get("scenario_coverage"),
+        "transition_coverage": audit.get("transition_coverage"),
+        "invariant_failures": audit.get("invariant_failures"),
+        "invalid_token_coverage": audit.get("invalid_token_coverage"),
+        "recovery_coverage": audit.get("recovery_coverage"),
+        "persistence_coverage": audit.get("persistence_coverage"),
+        "security_boundary_status": audit.get("security_boundary_status"),
         "evidence_sha256": _sha256(evidence_path),
-        "audit_status": audit.overall_status,
-        "overall_status": "PASS" if evidence["passed"] else "FAIL",
+        "audit_status": audit.get("overall_status"),
+        "overall_status": "PASS" if passed else "FAIL",
     }
-    return manifest
 
 
 def main() -> int:
