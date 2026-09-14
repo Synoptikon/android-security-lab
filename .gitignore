@@ -1,0 +1,25 @@
+# Local environment
+.env
+.env.*
+
+# Android / build artifacts
+.gradle/
+build/
+*.apk
+*.aab
+
+# Local results and potentially sensitive evidence
+13-results/raw/*
+13-results/normalized/*
+07-evidence/*
+
+# Keep directory placeholders
+!13-results/raw/.gitkeep
+!13-results/normalized/.gitkeep
+!07-evidence/.gitkeep
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
