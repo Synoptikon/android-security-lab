@@ -29,6 +29,14 @@ def _normal(device: VirtualDevice) -> None:
     device.transition(State.DEVICE_READY)
 
 
+def _setup_wizard(device: VirtualDevice) -> None:
+    device.transition(State.BOOT)
+    device.transition(State.FRP_LOCKED)
+    device.enter_setup_wizard()
+    device.simulate_setup_bypass("lab-default")
+    device.transition(State.DEVICE_READY)
+
+
 def _invalid_token(device: VirtualDevice) -> None:
     device.transition(State.BOOT)
     device.transition(State.FRP_LOCKED)
@@ -53,6 +61,7 @@ def _recovery(device: VirtualDevice) -> None:
 
 SCENARIOS: dict[str, Callable[[VirtualDevice], None]] = {
     "normal": _normal,
+    "setup-wizard": _setup_wizard,
     "invalid-token": _invalid_token,
     "illegal-transition": _illegal_transition,
     "recovery": _recovery,
