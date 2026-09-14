@@ -67,16 +67,16 @@ def evaluate_invariants(
             current = target
             continue
 
-        # Rejected events must not mutate the modeled state.
-        if event.reason.startswith("policy_") and event.to_state != current.value:
+        # A rejected policy decision is observational only; it cannot mutate state.
+        if event.reason.startswith("policy_") and event.accepted:
             policy_denials_non_mutating = False
 
         if event.reason == "invalid_lab_token":
             if current is not State.FRP_LOCKED or event.to_state != State.ACCOUNT_VERIFIED.value:
                 invalid_token_safe = False
 
-        if event.to_state == State.RECOVERY and event.reason.startswith("policy_"):
-            if policy.allows_recovery():
+        if event.to_state == State.RECOVERY:
+            if event.accepted != policy.allows_recovery():
                 recovery_policy_respected = False
 
     results.append(InvariantResult("accepted_transitions_legal", accepted_legal))
