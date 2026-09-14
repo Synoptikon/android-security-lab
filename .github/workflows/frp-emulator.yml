@@ -28,8 +28,11 @@ jobs:
       - run: python -c "import json; d=json.load(open('ci-result.json')); assert d['state']=='DEVICE_READY'; assert len(d['events'])==4"
       - run: python evidence.py
       - run: python audit.py
-      - run: python -c "import json; d=json.load(open('audit.json')); assert d['overall_status']=='PASS'; assert d['transition_coverage']==1.0; assert d['invariant_failures']==0"
+      - run: python -c "import json,hashlib; from pathlib import Path; d=json.load(open('audit.json')); m=json.load(open('reproducibility-manifest.json')); assert d['overall_status']=='PASS'; assert d['transition_coverage']==1.0; assert d['invariant_failures']==0; assert m['overall_status']=='PASS'; assert m['transition_coverage']==1.0; assert m['invariant_failures']==0; assert m['evidence_sha256']==hashlib.sha256(Path('evidence.json').read_bytes()).hexdigest(); assert m['commit_sha']!='unknown'"
       - uses: actions/upload-artifact@v4
         with:
           name: frp-emulator-evidence
-          path: 04-emulator/android-frp-emulator/evidence.json
+          path: |
+            04-emulator/android-frp-emulator/evidence.json
+            04-emulator/android-frp-emulator/audit.json
+            04-emulator/android-frp-emulator/reproducibility-manifest.json
