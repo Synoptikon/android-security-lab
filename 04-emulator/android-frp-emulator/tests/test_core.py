@@ -10,15 +10,27 @@ def test_full_scenario_reaches_ready():
     assert all(event.accepted for event in device.events)
 
 
+def test_full_scenario_event_sequence_is_deterministic():
+    device = run_full_scenario("emu-001", "LAB-FRP-AB12CD34")
+    assert [(event.from_state, event.to_state) for event in device.events] == [
+        (State.FACTORY_RESET.value, State.BOOT.value),
+        (State.BOOT.value, State.FRP_LOCKED.value),
+        (State.FRP_LOCKED.value, State.ACCOUNT_VERIFIED.value),
+        (State.ACCOUNT_VERIFIED.value, State.DEVICE_READY.value),
+    ]
+    assert [event.sequence for event in device.events] == [1, 2, 3, 4]
+
+
 def test_invalid_transition_is_rejected_and_logged():
     device = VirtualDevice("emu-002")
     with pytest.raises(InvalidTransition):
         device.transition(State.DEVICE_READY)
     assert device.events[-1].accepted is False
     assert device.events[-1].reason == "invalid_transition"
+    assert device.state is State.FACTORY_RESET
 
 
-def test_invalid_token_is_rejected():
+def test_invalid_token_is_rejected_without_state_change():
     device = VirtualDevice("emu-003")
     device.transition(State.BOOT)
     device.transition(State.FRP_LOCKED)
@@ -26,6 +38,7 @@ def test_invalid_token_is_rejected():
         device.activate("real-credential")
     assert device.state is State.FRP_LOCKED
     assert device.events[-1].reason == "invalid_lab_token"
+    assert device.events[-1].accepted is False
 
 
 def test_persistence_round_trip():
@@ -39,3 +52,11 @@ def test_recovery_returns_to_factory_reset():
     device.transition(State.RECOVERY)
     device.transition(State.FACTORY_RESET)
     assert device.state is State.FACTORY_RESET
+
+
+def test_recovery_path_preserves_event_sequence():
+    device = run_full_scenario("emu-006", "LAB-FRP-CAFEBEEF")
+    device.transition(State.RECOVERY)
+    device.transition(State.FACTORY_RESET)
+    assert [event.sequence for event in device.events] == [1, 2, 3, 4, 5, 6]
+    assert device.events[-1].to_state == State.FACTORY_RESET.value
