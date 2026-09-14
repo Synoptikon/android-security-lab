@@ -27,6 +27,7 @@ jobs:
       - run: python -c "import json; d=json.load(open('ci-result.json')); assert d['state']=='DEVICE_READY'; assert len(d['events'])==4"
       - run: python transition_matrix.py
       - run: python fault_injection.py
+      - run: python resilience_matrix.py
       - run: python evidence.py
       - run: python audit.py
       - run: python validate_release.py
@@ -40,3 +41,4 @@ jobs:
             04-emulator/android-frp-emulator/reproducibility-manifest.json
             04-emulator/android-frp-emulator/transition-matrix.json
             04-emulator/android-frp-emulator/fault-injection.json
+            04-emulator/android-frp-emulator/resilience-matrix.json
