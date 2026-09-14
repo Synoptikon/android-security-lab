@@ -44,49 +44,51 @@ def evaluate_invariants(
 
     current = State.FACTORY_RESET
     accepted_legal = True
+    policy_denials_non_mutating = True
+    invalid_token_safe = True
+    recovery_policy_respected = True
+
     for event in events:
+        if event.from_state != current.value:
+            accepted_legal = False
+            break
+
         if event.accepted:
             try:
                 target = State(event.to_state)
             except ValueError:
                 accepted_legal = False
                 break
-            if event.from_state != current.value or target not in TRANSITIONS[current]:
+            if target not in TRANSITIONS[current]:
                 accepted_legal = False
                 break
+            if event.reason.startswith("policy_"):
+                policy_denials_non_mutating = False
             current = target
-    results.append(InvariantResult("accepted_transitions_legal", accepted_legal))
+            continue
 
-    policy_denials_non_mutating = all(
-        not event.accepted
-        or not event.reason.startswith("policy_")
-        or event.from_state == event.to_state
-        for event in events
-    )
+        # Rejected events must not mutate the modeled state.
+        if event.reason.startswith("policy_") and event.to_state != current.value:
+            policy_denials_non_mutating = False
+
+        if event.reason == "invalid_lab_token":
+            if current is not State.FRP_LOCKED or event.to_state != State.ACCOUNT_VERIFIED.value:
+                invalid_token_safe = False
+
+        if event.to_state == State.RECOVERY and event.reason.startswith("policy_"):
+            if policy.allows_recovery():
+                recovery_policy_respected = False
+
+    results.append(InvariantResult("accepted_transitions_legal", accepted_legal))
     results.append(
         InvariantResult("policy_denials_are_non_mutating", policy_denials_non_mutating)
-    )
-
-    invalid_token_safe = all(
-        event.reason != "invalid_lab_token"
-        or event.to_state != State.ACCOUNT_VERIFIED.value
-        or not event.accepted
-        for event in events
     )
     results.append(
         InvariantResult("invalid_token_never_verifies_account", invalid_token_safe)
     )
-
-    recovery_allowed = policy.allows_recovery()
-    recovery_policy_respected = all(
-        event.to_state != State.RECOVERY
-        or event.accepted == recovery_allowed
-        for event in events
-    )
     results.append(
         InvariantResult("recovery_policy_is_respected", recovery_policy_respected)
     )
-
     results.append(
         InvariantResult(
             "final_state_matches_accepted_history",
@@ -98,6 +100,10 @@ def evaluate_invariants(
 
 def assert_invariants(state: State, events: list[Event], policy: PolicyProfile) -> None:
     """Raise a deterministic error if any named invariant fails."""
-    failures = [result.name for result in evaluate_invariants(state, events, policy) if not result.passed]
+    failures = [
+        result.name
+        for result in evaluate_invariants(state, events, policy)
+        if not result.passed
+    ]
     if failures:
         raise AssertionError("invariant failures: " + ",".join(failures))
