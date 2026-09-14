@@ -16,6 +16,8 @@ class State(str, Enum):
     FACTORY_RESET = "FACTORY_RESET"
     BOOT = "BOOT"
     FRP_LOCKED = "FRP_LOCKED"
+    SETUP_WIZARD = "SETUP_WIZARD"
+    SIMULATED_BYPASS = "SIMULATED_BYPASS"
     ACCOUNT_VERIFIED = "ACCOUNT_VERIFIED"
     DEVICE_READY = "DEVICE_READY"
     RECOVERY = "RECOVERY"
@@ -33,7 +35,9 @@ TOKEN_RE = re.compile(r"^LAB-FRP-[A-Z0-9]{8}$")
 TRANSITIONS = {
     State.FACTORY_RESET: {State.BOOT},
     State.BOOT: {State.FRP_LOCKED},
-    State.FRP_LOCKED: {State.ACCOUNT_VERIFIED},
+    State.FRP_LOCKED: {State.ACCOUNT_VERIFIED, State.SETUP_WIZARD},
+    State.SETUP_WIZARD: {State.SIMULATED_BYPASS},
+    State.SIMULATED_BYPASS: {State.ACCOUNT_VERIFIED},
     State.ACCOUNT_VERIFIED: {State.DEVICE_READY},
     State.DEVICE_READY: {State.RECOVERY},
     State.RECOVERY: {State.FACTORY_RESET},
@@ -73,6 +77,29 @@ class VirtualDevice:
             self._log("activate", State.ACCOUNT_VERIFIED, False, "invalid_lab_token")
             raise InvalidToken("expected synthetic token format LAB-FRP-XXXXXXXX")
         return self.transition(State.ACCOUNT_VERIFIED, source="activate")
+
+    def enter_setup_wizard(self) -> State:
+        """Enter the simulated Setup Wizard from the FRP-locked state."""
+        if self.state is not State.FRP_LOCKED:
+            self._log("setup-wizard", State.SETUP_WIZARD, False, "setup_wizard_requires_frp_locked")
+            raise InvalidTransition("Setup Wizard entry is only evaluated from FRP_LOCKED")
+        return self.transition(State.SETUP_WIZARD, source="setup-wizard")
+
+    def simulate_setup_bypass(self, profile: str = "lab-default") -> State:
+        """Advance the simulator through a synthetic Setup Wizard bypass.
+
+        This is a policy-state transition inside the controlled simulator. It
+        does not bypass FRP on Android, access credentials, or interact with a
+        real device.
+        """
+        if self.state is not State.SETUP_WIZARD:
+            self._log("setup-bypass", State.SIMULATED_BYPASS, False, "setup_bypass_requires_setup_wizard")
+            raise InvalidTransition("simulated bypass requires SETUP_WIZARD")
+        if not profile or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", profile):
+            self._log("setup-bypass", State.SIMULATED_BYPASS, False, "invalid_simulation_profile")
+            raise ValueError("simulation profile must be 1-32 lowercase alphanumeric characters, '-' or '_'")
+        self.transition(State.SIMULATED_BYPASS, source=f"setup-bypass:{profile}")
+        return self.transition(State.ACCOUNT_VERIFIED, source="setup-bypass:complete")
 
     def _log(self, source: str, target: State, accepted: bool, reason: str, previous: State | None = None) -> None:
         self.events.append(Event(
@@ -122,6 +149,15 @@ class VirtualDevice:
             elif event.reason == "activation_requires_frp_locked":
                 if current is State.FRP_LOCKED or target_state is not State.ACCOUNT_VERIFIED:
                     raise ValueError("activation rejection violates state contract")
+            elif event.reason == "setup_wizard_requires_frp_locked":
+                if current is State.FRP_LOCKED or target_state is not State.SETUP_WIZARD:
+                    raise ValueError("Setup Wizard rejection violates state contract")
+            elif event.reason == "setup_bypass_requires_setup_wizard":
+                if current is State.SETUP_WIZARD or target_state is not State.SIMULATED_BYPASS:
+                    raise ValueError("simulated bypass rejection violates state contract")
+            elif event.reason == "invalid_simulation_profile":
+                if current is not State.SETUP_WIZARD or target_state is not State.SIMULATED_BYPASS:
+                    raise ValueError("invalid-profile event violates Setup Wizard contract")
             else:
                 raise ValueError("unknown event rejection reason")
         if current is not device.state:
@@ -139,5 +175,16 @@ def run_full_scenario(device_id: str, token: str) -> VirtualDevice:
     device.transition(State.BOOT)
     device.transition(State.FRP_LOCKED)
     device.activate(token)
+    device.transition(State.DEVICE_READY)
+    return device
+
+
+def run_setup_wizard_scenario(device_id: str, profile: str = "lab-default") -> VirtualDevice:
+    """Run the complete controlled Setup Wizard transition path."""
+    device = VirtualDevice(device_id)
+    device.transition(State.BOOT)
+    device.transition(State.FRP_LOCKED)
+    device.enter_setup_wizard()
+    device.simulate_setup_bypass(profile)
     device.transition(State.DEVICE_READY)
     return device
