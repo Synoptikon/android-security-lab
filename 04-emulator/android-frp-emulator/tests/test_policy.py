@@ -1,6 +1,8 @@
 import pytest
 
+from core import InvalidTransition, State, VirtualDevice
 from policy import DEFAULT_POLICY, STRICT_POLICY, get_policy
+from scenario import run_scenario
 
 
 def test_default_policy_is_valid_and_allows_recovery():
@@ -46,3 +48,26 @@ def test_reset_policy_is_mandatory_for_controlled_lab():
     )
     with pytest.raises(ValueError, match="FACTORY_RESET"):
         invalid.validate()
+
+
+def test_strict_policy_denies_recovery_and_records_decision():
+    device = VirtualDevice("policy-test")
+    device.transition(State.BOOT, policy=STRICT_POLICY)
+    device.transition(State.FRP_LOCKED, policy=STRICT_POLICY)
+    device.activate("LAB-FRP-AB12CD34", policy=STRICT_POLICY)
+    device.transition(State.DEVICE_READY, policy=STRICT_POLICY)
+
+    with pytest.raises(InvalidTransition, match="denied by policy strict"):
+        device.transition(State.RECOVERY, policy=STRICT_POLICY)
+
+    assert device.state is State.DEVICE_READY
+    assert device.events[-1].accepted is False
+    assert device.events[-1].reason == "policy_recovery_denied:strict"
+
+
+def test_scenario_policy_metadata_and_decision_coverage():
+    result = run_scenario("strict-recovery", "policy-scenario")
+    assert result.passed
+    assert result.policy == "strict"
+    assert result.policy_decisions == 1
+    assert result.rejected_events == 1
