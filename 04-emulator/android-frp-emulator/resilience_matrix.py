@@ -12,7 +12,7 @@ from pathlib import Path
 
 from core import State, VirtualDevice
 from fault_injection import exercise_faults
-from scenario import run_scenario
+from scenario import run_scenario, validate_invariants
 from transition_matrix import exercise_transitions
 
 ROOT = Path(__file__).resolve().parent
@@ -25,7 +25,17 @@ def _normal() -> dict[str, object]:
     return {
         "status": "PASS" if result["state"] == State.DEVICE_READY.value else "FAIL",
         "final_state": result["state"],
-        "events": len(result["events"]),
+        "events": result["event_count"],
+        "invariant_errors": result.get("invariant_errors", []),
+    }
+
+
+def _setup_wizard() -> dict[str, object]:
+    result = asdict(run_scenario("setup-wizard", "RESILIENCE-SETUP"))
+    return {
+        "status": "PASS" if result["state"] == State.DEVICE_READY.value else "FAIL",
+        "final_state": result["state"],
+        "events": result["event_count"],
         "invariant_errors": result.get("invariant_errors", []),
     }
 
@@ -41,15 +51,18 @@ def _invalid_token() -> dict[str, object]:
 
 
 def _illegal_transition() -> dict[str, object]:
-    device = VirtualDevice()
+    device = VirtualDevice("resilience-illegal")
     before = device.state
-    after = device.transition(State.DEVICE_READY)
-    rejected = after == before and device.events[-1].accepted is False
+    try:
+        device.transition(State.DEVICE_READY)
+    except ValueError:
+        pass
+    rejected = device.state is before and device.events[-1].accepted is False
     return {
         "status": "PASS" if rejected else "FAIL",
         "state": device.state.value,
         "rejected": rejected,
-        "invariant_errors": device.validate_invariants(),
+        "invariant_errors": validate_invariants(device),
     }
 
 
@@ -58,7 +71,7 @@ def _recovery() -> dict[str, object]:
     return {
         "status": "PASS" if result["state"] == State.FACTORY_RESET.value else "FAIL",
         "final_state": result["state"],
-        "events": len(result["events"]),
+        "events": result["event_count"],
         "invariant_errors": result.get("invariant_errors", []),
     }
 
@@ -77,6 +90,7 @@ def exercise_resilience() -> dict[str, object]:
     transition = exercise_transitions()
     cases = {
         "normal": _normal(),
+        "setup-wizard": _setup_wizard(),
         "invalid-token": _invalid_token(),
         "illegal-transition": _illegal_transition(),
         "recovery": _recovery(),
