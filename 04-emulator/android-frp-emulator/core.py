@@ -1,7 +1,7 @@
-"""Deterministic FRP state machine for a virtual Android device.
+"""Deterministic FRP state machine for the controlled Android FRP simulator.
 
-SECURITY BOUNDARY: this module simulates policy decisions only. It never talks
-ADB/Fastboot, accesses credentials, disables FRP, or operates on real devices.
+SECURITY BOUNDARY: simulator-only policy modeling. Never accesses devices,
+ADB/Fastboot, credentials, or real FRP state.
 """
 from __future__ import annotations
 
@@ -58,20 +58,13 @@ class VirtualDevice:
     state: State = State.FACTORY_RESET
     events: list[Event] = field(default_factory=list)
 
-    def transition(
-        self,
-        target: State,
-        source: str = "simulator",
-        policy: PolicyProfile = DEFAULT_POLICY,
-    ) -> State:
+    def transition(self, target: State, source: str = "simulator", policy: PolicyProfile = DEFAULT_POLICY) -> State:
         if target not in TRANSITIONS[self.state]:
             self._log(source, target, False, "invalid_transition")
             raise InvalidTransition(f"{self.state.value} -> {target.value} is not allowed")
         if target is State.RECOVERY and not policy.allows_recovery():
             self._log(source, target, False, f"policy_recovery_denied:{policy.name}")
-            raise InvalidTransition(
-                f"{self.state.value} -> {target.value} denied by policy {policy.name}"
-            )
+            raise InvalidTransition(f"{self.state.value} -> {target.value} denied by policy {policy.name}")
         previous = self.state
         self.state = target
         self._log(source, target, True, "transition_accepted", previous)
@@ -90,21 +83,60 @@ class VirtualDevice:
         return self.transition(State.ACCOUNT_VERIFIED, source="activate", policy=policy)
 
     def _log(self, source: str, target: State, accepted: bool, reason: str, previous: State | None = None) -> None:
-        self.events.append(Event(
-            sequence=len(self.events) + 1,
-            source=source,
-            from_state=(previous or self.state).value,
-            to_state=target.value,
-            accepted=accepted,
-            reason=reason,
-        ))
+        self.events.append(Event(len(self.events) + 1, source, (previous or self.state).value, target.value, accepted, reason))
+
+    def validate_invariants(self) -> list[str]:
+        errors: list[str] = []
+        if [e.sequence for e in self.events] != list(range(1, len(self.events) + 1)):
+            errors.append("event_sequence_not_contiguous")
+        state = State.FACTORY_RESET
+        for event in self.events:
+            if event.from_state != state.value:
+                errors.append("event_history_from_state_mismatch")
+                break
+            if event.accepted:
+                try:
+                    target = State(event.to_state)
+                except ValueError:
+                    errors.append("accepted_event_to_state_invalid")
+                    break
+                if target not in TRANSITIONS[state]:
+                    errors.append("accepted_transition_illegal")
+                    break
+                if event.reason != "transition_accepted":
+                    errors.append("accepted_event_reason_invalid")
+                    break
+                state = target
+            elif event.reason == "invalid_transition":
+                try:
+                    target = State(event.to_state)
+                except ValueError:
+                    errors.append("rejected_event_to_state_invalid")
+                    break
+                if target in TRANSITIONS[state]:
+                    errors.append("rejected_legal_transition")
+                    break
+            elif event.reason == "invalid_lab_token":
+                if state is not State.FRP_LOCKED or event.to_state != State.ACCOUNT_VERIFIED.value:
+                    errors.append("invalid_token_event_context_invalid")
+                    break
+            elif event.reason == "activation_requires_frp_locked":
+                if state is State.FRP_LOCKED or event.to_state != State.ACCOUNT_VERIFIED.value:
+                    errors.append("activation_rejection_context_invalid")
+                    break
+            elif event.reason.startswith("policy_"):
+                if event.to_state not in {s.value for s in State}:
+                    errors.append("policy_event_to_state_invalid")
+                    break
+            else:
+                errors.append("unknown_rejection_reason")
+                break
+        if state.value != self.state.value:
+            errors.append("serialized_state_does_not_match_history")
+        return errors
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "device_id": self.device_id,
-            "state": self.state.value,
-            "events": [e.__dict__ for e in self.events],
-        }
+        return {"device_id": self.device_id, "state": self.state.value, "events": [e.__dict__ for e in self.events]}
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2, sort_keys=True)
@@ -112,12 +144,24 @@ class VirtualDevice:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "VirtualDevice":
         device = cls(device_id=str(data["device_id"]), state=State(data["state"]))
-        device.events = [Event(**event) for event in data.get("events", [])]
+        raw_events = data.get("events", [])
+        if not isinstance(raw_events, list):
+            raise ValueError("events must be a list")
+        try:
+            device.events = [Event(**event) for event in raw_events]
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid event payload") from exc
+        errors = device.validate_invariants()
+        if errors:
+            raise ValueError("invalid persisted state: " + ",".join(errors))
         return device
 
     @classmethod
     def from_json(cls, payload: str) -> "VirtualDevice":
-        return cls.from_dict(json.loads(payload))
+        data = json.loads(payload)
+        if not isinstance(data, dict):
+            raise ValueError("serialized device must be an object")
+        return cls.from_dict(data)
 
 
 def run_full_scenario(device_id: str, token: str) -> VirtualDevice:
