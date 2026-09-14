@@ -11,7 +11,8 @@ import json
 from pathlib import Path
 
 from core import State, TRANSITIONS, VirtualDevice
-from scenario import SCENARIOS, validate_invariants
+from policy import POLICIES
+from scenario import SCENARIOS, SCENARIO_POLICIES, validate_invariants
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,8 @@ class AuditReport:
     invalid_token_coverage: bool
     recovery_coverage: bool
     persistence_coverage: bool
+    policy_profile_coverage: float
+    policy_decision_coverage: bool
     invariant_failures: int
     security_boundary_status: str
     uncovered_transitions: tuple[str, ...]
@@ -45,9 +48,10 @@ def _transition_keys() -> set[tuple[str, str]]:
 
 def _run_devices() -> list[VirtualDevice]:
     devices: list[VirtualDevice] = []
-    for index, runner in enumerate(SCENARIOS.values(), 1):
+    for index, name in enumerate(SCENARIOS, 1):
+        runner = SCENARIOS[name]
         device = VirtualDevice(f"audit-{index:03d}")
-        runner(device)
+        runner(device, SCENARIO_POLICIES[name])
         devices.append(device)
     return devices
 
@@ -70,6 +74,13 @@ def run_audit() -> AuditReport:
         event.from_state == State.RECOVERY.value and event.to_state == State.FACTORY_RESET.value
         for event in accepted
     )
+    covered_profiles = {
+        SCENARIO_POLICIES[name].name for name in SCENARIOS if name in SCENARIO_POLICIES
+    }
+    policy_profile_coverage = len(covered_profiles & set(POLICIES)) / len(POLICIES) if POLICIES else 1.0
+    policy_decision_coverage = any(
+        event.reason.startswith("policy_") and not event.accepted for event in all_events
+    )
 
     original = VirtualDevice("audit-persistence")
     original.transition(State.BOOT)
@@ -84,12 +95,14 @@ def run_audit() -> AuditReport:
         and invalid_token_coverage
         and recovery_coverage
         and persistence_coverage
+        and policy_profile_coverage == 1.0
+        and policy_decision_coverage
         and invariant_failures == 0
         and security_boundary_status.startswith("PASS:")
     )
 
     return AuditReport(
-        schema="frp-emulator-audit/v1",
+        schema="frp-emulator-audit/v2",
         scope="controlled-simulator-only",
         scenario_count=len(devices),
         scenario_coverage=scenario_coverage,
@@ -99,6 +112,8 @@ def run_audit() -> AuditReport:
         invalid_token_coverage=invalid_token_coverage,
         recovery_coverage=recovery_coverage,
         persistence_coverage=persistence_coverage,
+        policy_profile_coverage=policy_profile_coverage,
+        policy_decision_coverage=policy_decision_coverage,
         invariant_failures=invariant_failures,
         security_boundary_status=security_boundary_status,
         uncovered_transitions=tuple(uncovered),
