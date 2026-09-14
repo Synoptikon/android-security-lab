@@ -12,12 +12,14 @@ from scenario import SCENARIOS, run_scenario
 def main() -> int:
     results = [run_scenario(name, f"ci-{index:03d}") for index, name in enumerate(SCENARIOS, 1)]
     audit = run_audit()
+    passed = all(result.passed for result in results) and audit.overall_status == "PASS"
     payload = {
         "schema": "frp-emulator-evidence/v2",
         "scope": "controlled-simulator-only",
         "scenarios": [result.__dict__ for result in results],
         "audit": audit.to_dict(),
-        "passed": all(result.passed for result in results) and audit.overall_status == "PASS",
+        "passed": passed,
+        "overall_status": "PASS" if passed else "FAIL",
     }
 
     evidence_path = Path("evidence.json")
@@ -31,7 +33,7 @@ def main() -> int:
 
     print(json.dumps(payload, indent=2, sort_keys=True))
     print(json.dumps(manifest, indent=2, sort_keys=True))
-    return 0 if payload["passed"] and manifest["overall_status"] == "PASS" else 1
+    return 0 if payload["overall_status"] == "PASS" and manifest["overall_status"] == "PASS" else 1
 
 
 if __name__ == "__main__":
