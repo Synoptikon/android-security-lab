@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from audit import run_audit
+from manifest import build_manifest
 from scenario import SCENARIOS, run_scenario
 
 
@@ -20,8 +21,10 @@ def main() -> int:
     }
     output = Path("evidence.json")
     output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    manifest = build_manifest()
     print(json.dumps(payload, indent=2, sort_keys=True))
-    return 0 if payload["passed"] else 1
+    print(json.dumps(manifest, indent=2, sort_keys=True))
+    return 0 if payload["passed"] and manifest["overall_status"] == "PASS" else 1
 
 
 if __name__ == "__main__":
