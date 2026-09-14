@@ -1,0 +1,27 @@
+name: FRP Emulator Validation
+
+on:
+  push:
+    paths:
+      - '04-emulator/android-frp-emulator/**'
+      - '.github/workflows/frp-emulator.yml'
+  pull_request:
+    paths:
+      - '04-emulator/android-frp-emulator/**'
+      - '.github/workflows/frp-emulator.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: 04-emulator/android-frp-emulator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+      - run: python cli.py scenario ci-001 LAB-FRP-AB12CD34 --out ci-result.json
+      - run: python -c "import json; d=json.load(open('ci-result.json')); assert d['state']=='DEVICE_READY'; assert len(d['events'])==4"
