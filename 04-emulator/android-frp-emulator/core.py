@@ -188,3 +188,87 @@ def run_setup_wizard_scenario(device_id: str, profile: str = "lab-default") -> V
     device.simulate_setup_bypass(profile)
     device.transition(State.DEVICE_READY)
     return device
+
+
+class WizardViewState(str, Enum):
+    """Frontend-neutral presentation states exposed by the simulator."""
+    LOCKED = "LOCKED"
+    SETUP_WIZARD = "SETUP_WIZARD"
+    SIMULATED_BYPASS = "SIMULATED_BYPASS"
+    ACCOUNT_VERIFIED = "ACCOUNT_VERIFIED"
+    DEVICE_READY = "DEVICE_READY"
+
+
+class WizardAction(str, Enum):
+    ENTER_SETUP_WIZARD = "ENTER_SETUP_WIZARD"
+    SIMULATE_BYPASS = "SIMULATE_BYPASS"
+    COMPLETE = "COMPLETE"
+
+
+_STATE_TO_VIEW = {
+    State.FRP_LOCKED: WizardViewState.LOCKED,
+    State.SETUP_WIZARD: WizardViewState.SETUP_WIZARD,
+    State.SIMULATED_BYPASS: WizardViewState.SIMULATED_BYPASS,
+    State.ACCOUNT_VERIFIED: WizardViewState.ACCOUNT_VERIFIED,
+    State.DEVICE_READY: WizardViewState.DEVICE_READY,
+}
+
+_ALLOWED_ACTIONS = {
+    WizardViewState.LOCKED: (WizardAction.ENTER_SETUP_WIZARD,),
+    WizardViewState.SETUP_WIZARD: (WizardAction.SIMULATE_BYPASS,),
+    WizardViewState.SIMULATED_BYPASS: (),
+    WizardViewState.ACCOUNT_VERIFIED: (WizardAction.COMPLETE,),
+    WizardViewState.DEVICE_READY: (),
+}
+
+
+@dataclass(frozen=True)
+class SetupWizardViewModel:
+    """UI contract derived from the authoritative state machine."""
+    device_id: str
+    state: WizardViewState
+    allowed_actions: tuple[str, ...]
+    simulation_profile: str | None = None
+    security_boundary: str = "controlled-simulator-only"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "device_id": self.device_id,
+            "state": self.state.value,
+            "allowed_actions": list(self.allowed_actions),
+            "simulation_profile": self.simulation_profile,
+            "security_boundary": self.security_boundary,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), indent=2, sort_keys=True)
+
+
+def build_setup_wizard_view(device: VirtualDevice, profile: str | None = None) -> SetupWizardViewModel:
+    """Build a frontend-neutral view model without duplicating core policy."""
+    try:
+        view_state = _STATE_TO_VIEW[device.state]
+    except KeyError as exc:
+        raise ValueError(f"state {device.state.value} is not exposed by the Setup Wizard contract") from exc
+    actions = tuple(action.value for action in _ALLOWED_ACTIONS[view_state])
+    return SetupWizardViewModel(device.device_id, view_state, actions, profile)
+
+
+def dispatch_setup_wizard_action(
+    device: VirtualDevice,
+    action: WizardAction,
+    profile: str = "lab-default",
+) -> SetupWizardViewModel:
+    """Apply one UI action through the core state machine."""
+    view = build_setup_wizard_view(device, profile)
+    if action.value not in view.allowed_actions:
+        raise ValueError(f"action {action.value} is not allowed from {view.state.value}")
+    if action is WizardAction.ENTER_SETUP_WIZARD:
+        device.enter_setup_wizard()
+    elif action is WizardAction.SIMULATE_BYPASS:
+        device.simulate_setup_bypass(profile)
+    elif action is WizardAction.COMPLETE:
+        device.transition(State.DEVICE_READY, source="setup-wizard:complete")
+    else:
+        raise ValueError(f"unsupported Setup Wizard action: {action.value}")
+    return build_setup_wizard_view(device, profile)
